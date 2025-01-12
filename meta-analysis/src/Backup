@@ -1,0 +1,278 @@
+import React, { useState } from 'react';
+import axios from 'axios';
+import './App.css';
+
+function App() {
+  const [input, setInput] = useState('');
+  const [articles, setArticles] = useState([]); // Store fetched articles
+  const [outputs, setOutputs] = useState([]); // Store user inputs
+  const [error, setError] = useState(''); // Error message state
+  const [metaAnalysisVisible, setMetaAnalysisVisible] = useState(false); // Meta-analysis text box visibility
+  const [showConfirmClear, setShowConfirmClear] = useState(false); // Confirmation for clearing inputs
+  const [loading, setLoading] = useState(false); // Loading state
+  const [warning, setWarning] = useState(''); // Warning for no articles selected
+
+  const handleFetchArticles = async (prompt) => {
+    try {
+      setLoading(true); // Show loading indicator
+      const apiUrl = 'https://meta-analysis-ca9ad5868390.herokuapp.com/api/scrape-articles';
+      const payload = { prompt };
+
+      const response = await axios.post(apiUrl, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+
+      setArticles(response.data); // Update articles state with the response data
+      setOutputs([...outputs, prompt]); // Add the input to the outputs list
+      setError(''); // Clear any previous errors
+    } catch (err) {
+      setError('Error fetching articles. Please try again.');
+      console.error(err);
+    } finally {
+      setLoading(false); // Hide loading indicator
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!input.trim()) {
+      setError('Input cannot be empty.');
+      return;
+    }
+    await handleFetchArticles(input); // Fetch articles from API
+    setInput(''); // Clear the input box
+  };
+
+  const handleClearAll = () => {
+    setOutputs([]);
+    setArticles([]);
+    setMetaAnalysisVisible(false);
+    setShowConfirmClear(false);
+    setWarning('');
+  };
+
+  const handleGenerateMetaAnalysis = () => {
+    const selectedArticles = articles.filter((_, index) => {
+      const checkbox = document.getElementById(`item-${index}`);
+      return checkbox && checkbox.checked;
+    });
+
+    if (selectedArticles.length === 0) {
+      setWarning('Please select at least one article to generate a meta-analysis.');
+      return;
+    }
+
+    setMetaAnalysisVisible(true);
+    setWarning(''); // Clear any previous warnings
+  };
+
+  return (
+    <div className="App" style={{ display: 'flex', height: '100vh', position: 'relative' }}>
+      {/* Sidebar for History */}
+      <div
+        style={{
+          width: '20%',
+          backgroundColor: '#222',
+          color: '#fff',
+          position: 'fixed',
+          top: 0,
+          bottom: 0,
+          left: 0,
+          borderRight: '1px solid #ccc',
+          overflowY: 'auto',
+          padding: '10px',
+        }}
+      >
+        <h3>History</h3>
+        {outputs.map((output, index) => (
+          <div
+            key={index}
+            style={{
+              border: '2px solid #ddd',
+              padding: '10px',
+              borderRadius: '10px',
+              marginBottom: '10px',
+              backgroundColor: '#333',
+            }}
+          >
+            <p>{output}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Main Content */}
+      <div style={{ flex: 1, padding: '10px', marginLeft: '20%', marginRight: '20%' }}>
+        <div>
+          <h1>Meta-Analysis Generator</h1>
+          <p style={{ fontSize: '1rem', color: '#555', marginTop: '10px' }}>
+            Ask a research question, choose articles, and we'll generate a meta-analysis.
+          </p>
+          <form onSubmit={handleSubmit}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Enter your research question here"
+              rows="4"
+              cols="50"
+              style={{ borderRadius: '10px', padding: '10px', width: '100%' }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+            />
+            <div style={{ textAlign: 'center', marginTop: '10px' }}>
+              <button
+                type="submit"
+                style={{ fontSize: '1.2rem', padding: '10px 20px', borderRadius: '10px' }}
+              >
+                Submit
+              </button>
+            </div>
+          </form>
+          {error && <p style={{ color: 'red', textAlign: 'center' }}>{error}</p>}
+          {loading && <p style={{ color: 'blue', textAlign: 'center' }}>Loading...</p>}
+        </div>
+
+        {/* Articles Table */}
+        {articles.length > 0 && (
+          <div style={{ marginTop: '20px' }}>
+            <h2>Fetched Articles</h2>
+            <div style={{ marginTop: '10px' }}>
+              {articles.map((article, index) => (
+                <div
+                  key={index}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    backgroundColor: '#222',
+                    border: '1px solid #ddd',
+                    borderRadius: '10px',
+                    padding: '15px',
+                    marginBottom: '10px',
+                  }}
+                >
+                  <div style={{ marginRight: '15px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      id={`item-${index}`}
+                      style={{ width: '20px', height: '20px' }}
+                    />
+                  </div>
+                  <div>
+                    <a
+                      href={article.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#FFF', textDecoration: 'underline', fontSize: '1.1rem' }}
+                    >
+                      {article.title}
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Meta-Analysis Button */}
+        {articles.length > 0 && (
+          <div style={{ textAlign: 'center', marginTop: '20px', paddingBottom: '40px' }}>
+            <button
+              onClick={handleGenerateMetaAnalysis}
+              style={{ fontSize: '1.2rem', padding: '10px 20px', borderRadius: '10px' }}
+            >
+              Generate Meta-Analysis
+            </button>
+            {warning && (
+              <p style={{ color: 'red', marginTop: '10px', textAlign: 'center' }}>{warning}</p>
+            )}
+          </div>
+        )}
+
+        {metaAnalysisVisible && (
+          <div style={{ marginTop: '20px', textAlign: 'center' }}>
+            <textarea
+              placeholder="Meta-analysis results will appear here..."
+              rows="10"
+              cols="70"
+              style={{ width: '80%', padding: '10px', fontSize: '1rem', borderRadius: '10px' }}
+            />
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <button
+                onClick={() => setShowConfirmClear(true)}
+                style={{ fontSize: '1.2rem', padding: '10px 20px', borderRadius: '10px' }}
+              >
+                Clear All Inputs
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Clear All Confirmation Dialog */}
+        {showConfirmClear && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              backgroundColor: '#222',
+              padding: '20px',
+              boxShadow: '0px 0px 10px rgba(0,0,0,0.5)',
+              borderRadius: '10px',
+              border: '1px solid #F9F9F9',
+              textAlign: 'center',
+            }}
+          >
+            <p>Are you sure you want to clear all inputs? This will delete your meta-analysis.</p>
+            <div style={{ marginTop: '10px' }}>
+              <button
+                onClick={handleClearAll}
+                style={{ marginRight: '10px', padding: '10px 20px', fontSize: '1rem', borderRadius: '10px' }}
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setShowConfirmClear(false)}
+                style={{ padding: '10px 20px', fontSize: '1rem', borderRadius: '10px' }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sidebar for Browser */}
+      <div
+        style={{
+          width: '20%',
+          backgroundColor: '#222',
+          color: '#fff',
+          position: 'fixed',
+          top: 0,
+          bottom: 0,
+          right: 0,
+          borderLeft: '1px solid #ccc',
+          overflowY: 'auto',
+          padding: '10px',
+        }}
+      >
+        <h3>Browser</h3>
+        <div style={{ border: '2px solid #ddd', padding: '10px', borderRadius: '10px', marginBottom: '10px' }}>
+          <p>PDF A</p>
+        </div>
+        <div style={{ border: '2px solid #ddd', padding: '10px', borderRadius: '10px', marginBottom: '10px' }}>
+          <p>PDF B</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;

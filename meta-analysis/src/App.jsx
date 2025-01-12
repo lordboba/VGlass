@@ -1,85 +1,172 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import './App.css';
-import ScrapeArticles from './components/ScrapeArticles';
+import GlassLogo from './GlassLogo.png'; // Importing the uploaded logo
 
 function App() {
   const [input, setInput] = useState('');
-  const [outputs, setOutputs] = useState([]); // Store a list of outputs
+  const [articles, setArticles] = useState([]); // Store fetched articles
+  const [outputs, setOutputs] = useState([]); // Store user inputs
   const [error, setError] = useState(''); // Error message state
-  const [metaAnalysisVisible, setMetaAnalysisVisible] = useState(false); // Meta-analysis textbox visibility
+  const [promptP, setPrompt] = useState(''); //prompt state
+  const [metaAnalysisVisible, setMetaAnalysisVisible] = useState(false); // Meta-analysis text box visibility
   const [showConfirmClear, setShowConfirmClear] = useState(false); // Confirmation for clearing inputs
-  const [activeTab, setActiveTab] = useState('metaAnalysis'); // Active tab state
+  const [loading, setLoading] = useState(false); // Loading state
+  const [showNoArticlesWarning, setShowNoArticlesWarning] = useState(false); // Warning for no articles checked
+  const [showConfirmNewQuestion, setShowConfirmNewQuestion] = useState(false); // Confirmation for new question
+  const [pdfUrl, setPdfUrl] = useState(null); // Add this state variable with the other useState declarations
+  const [progress, setProgress] = useState(0);
+  const [statusMessage, setStatusMessage] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleFetchArticles = async (prompt) => {
+    try {
+      setLoading(true); // Show loading indicator
+      const apiUrl = 'https://meta-analysis-ca9ad5868390.herokuapp.com/api/scrape-articles';
+      const payload = { prompt };
+
+      const response = await axios.post(apiUrl, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+
+      setArticles(response.data); // Update articles state with the response data
+      setOutputs([...outputs, prompt]); // Add the input to the outputs list
+      setError(''); // Clear any previous errors
+    } catch (err) {
+      setError('Error fetching articles. Please try again.');
+      console.error(err);
+    } finally {
+      setLoading(false); // Hide loading indicator
+    }
+  };
+  const generateAnalysis = async (article_links) => {
+    try {
+      setLoading(true);
+      setProgress(0);
+      setStatusMessage('Starting analysis...');
+      
+      const apiUrl = 'https://meta-analysis-ca9ad5868390.herokuapp.com/api/start-analysis';
+      const payload = { article_links };
+      // Start the analysis
+      const startResponse = await axios.post(apiUrl, payload);
+      const { task_id } = startResponse.data;
+      
+      // Poll for results
+      const checkStatus = async () => {
+        try {
+          const response = await axios.get(
+            `https://meta-analysis-ca9ad5868390.herokuapp.com/api/check-analysis/${task_id}`
+          );
+          
+          // If response is JSON, update progress
+          if (response.headers['content-type'].includes('application/json')) {
+            const { status, progress, status_message, error } = response.data;
+            
+            setProgress(progress);
+            setStatusMessage(status_message);
+            
+            if (status === 'failed') {
+              setError(error);
+              setLoading(false);
+              return true; // Stop polling
+            }
+            return false; // Continue polling
+          }
+          
+          // If response is PDF, download it
+          if (response.headers['content-type'] === 'application/pdf') {
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', 'research_analysis.pdf');
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setProgress(100);
+            setStatusMessage('Analysis complete!');
+            setLoading(false);
+            return true; // Stop polling
+          }
+          
+          return false;
+          
+        } catch (error) {
+          if (error.response?.status !== 404) {
+            setError('Error checking analysis status: ' + error.message);
+            setLoading(false);
+            return true; // Stop polling
+          }
+          return false; // Continue polling on 404
+        }
+      };
+      
+      // Poll every 3 seconds until complete
+      const pollInterval = setInterval(async () => {
+        const isComplete = await checkStatus();
+        if (isComplete) {
+          clearInterval(pollInterval);
+        }
+      }, 3000);
+      
+      // Set a timeout to stop polling after 10 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setLoading(false);
+        setError('Analysis timed out after 10 minutes');
+      }, 600000);
+      
+    } catch (error) {
+      setError('Failed to start analysis: ' + error.message);
+      setLoading(false);
+    }
+  };
+  
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) {
       setError('Input cannot be empty.');
       return;
     }
-    setError(''); // Clear any previous error
-    setOutputs([...outputs, input]); // Add the new input to the outputs list
-    setInput(''); // Clear the input box
+    if (outputs.length > 0 || articles.length > 0) {
+      setShowConfirmNewQuestion(true);
+    } else {
+      setPrompt(input);
+      await handleFetchArticles(input); // Fetch articles from API
+      setInput(''); // Clear the input box
+    }
   };
 
-  const handleMetaAnalysis = () => {
-    setMetaAnalysisVisible(true); // Show the meta-analysis text box
+  const confirmNewQuestion = async () => {
+    setArticles([]);
+    setOutputs([]);
+    setMetaAnalysisVisible(false);
+    await handleFetchArticles(input); // Fetch articles from API
+    setInput('');
+    setShowConfirmNewQuestion(false);
   };
 
   const handleClearAll = () => {
-    setOutputs([]); // Clear all outputs
-    setMetaAnalysisVisible(false); // Hide the meta-analysis text box
-    setShowConfirmClear(false); // Hide confirmation dialog
+    if (pdfUrl) {
+      window.URL.revokeObjectURL(pdfUrl); // Clean up the blob URL
+      setPdfUrl(null);
+    }
+    setOutputs([]);
+    setArticles([]);
+    setMetaAnalysisVisible(false);
+    setShowConfirmClear(false);
   };
 
   return (
-    <div className="App" style={{ display: 'flex', height: '100vh', position: 'relative' }}>
-      {/* Sidebar for History */}
-      <div
-        style={{
-          width: '20%',
-          backgroundColor: '#222', // Light gray background for visibility
-          position: 'fixed',
-          top: 0,
-          bottom: 0,
-          left: 0,
-          borderRight: '1px solid #ccc',
-          overflowY: 'auto',
-          padding: '10px',
-          zIndex: 1000, // Ensure it's above other elements
-        }}
-      >
-        <h3>History</h3>
-        <div
-          style={{
-            border: '5px solid #ddd',
-            padding: '20px',
-            borderRadius: '10px',
-            marginBottom: '10px',
-          }}
-        >
-          <p>PDF 1</p>
-        </div>
-        <div
-          style={{
-            border: '5px solid #ddd',
-            padding: '10px',
-            borderRadius: '10px',
-            marginBottom: '10px',
-          }}
-        >
-          <p>PDF 2</p>
-        </div>
+    <div className="App" style={{ display: 'flex', height: '100vh', flexDirection: 'column', position: 'relative' }}>
+      {/* Header with Logo */}
+      <div style={{ textAlign: 'center', padding: '10px 0', backgroundColor: '#222', color: '#fff' }}>
+        <img src={GlassLogo} alt="Glass Logo" style={{ height: '80px' }} />
       </div>
 
       {/* Main Content */}
-      <div
-        style={{
-          flex: 1,
-          padding: '10px',
-          marginLeft: '20%',
-          marginRight: '20%', // Leave space for the sidebars
-        }}
-      >
+      <div style={{ flex: 1, padding: '10px', margin: '0 auto', width: '80%', textAlign: 'center', paddingBottom: '60px' }}>
         <div>
           <h1>Meta-Analysis Generator</h1>
           <p style={{ fontSize: '1rem', color: '#555', marginTop: '10px' }}>
@@ -92,7 +179,7 @@ function App() {
               placeholder="Enter your research question here"
               rows="4"
               cols="50"
-              style={{ borderRadius: '10px', padding: '10px' }}
+              style={{ borderRadius: '10px', padding: '10px', width: '100%' }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -110,56 +197,98 @@ function App() {
             </div>
           </form>
           {error && <p style={{ color: 'red', textAlign: 'center' }}>{error}</p>}
+          {loading && <p style={{ color: 'blue', textAlign: 'center' }}>Loading...</p>}
         </div>
-        <ScrapeArticles />
-        <div
-          className="output"
-          style={{
-            maxHeight: '300px',
-            overflowY: 'auto',
-            marginTop: '20px',
-            border: '1px solid #ccc',
-            padding: '10px',
-            borderRadius: '10px',
-          }}
-        >
-          <h2>Output:</h2>
-          <div>
-            {outputs.map((item, index) => (
-              <div
-                key={index}
-                className="output-item"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  marginBottom: '10px',
-                  border: '1px solid #ddd',
-                  padding: '10px',
-                  borderRadius: '10px',
-                }}
-              >
-                <input type="checkbox" id={`item-${index}`} style={{ marginRight: '10px' }} />
-                <label htmlFor={`item-${index}`}>{item}</label>
-              </div>
-            ))}
+
+        {/* Articles Table */}
+        {articles.length > 0 && (
+          <div style={{ marginTop: '20px' }}>
+            <h2>Fetched Articles</h2>
+            <div style={{ marginTop: '10px' }}>
+              {articles.map((article, index) => (
+                <div
+                  key={index}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    backgroundColor: '#222',
+                    border: '1px solid #ddd',
+                    borderRadius: '10px',
+                    padding: '15px',
+                    marginBottom: '10px',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ marginRight: '15px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      id={`item-${index}`}
+                      style={{ width: '20px', height: '20px' }}
+                    />
+                  </div>
+                  <div>
+                    <a
+                      href={article.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#FFF', textDecoration: 'underline', fontSize: '1.1rem' }}
+                    >
+                      {article.title}
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-        <div style={{ textAlign: 'center', marginTop: '20px' }}>
-          <button
-            onClick={handleMetaAnalysis}
-            style={{ fontSize: '1.2rem', padding: '10px 20px', borderRadius: '10px' }}
-          >
-            Generate Meta-Analysis
-          </button>
-        </div>
+        )}
+
+        {/* Meta-Analysis Button */}
+        {articles.length > 0 && (
+          <div style={{ textAlign: 'center', marginTop: '20px' }}>
+            <button
+              onClick={() => {
+                const checkedArticles = Array.from(
+                  document.querySelectorAll('input[type="checkbox"]:checked')
+                ).map(checkbox => {
+                  // Get the index from the checkbox id
+                  const index = parseInt(checkbox.id.split('-')[1], 10);
+                  // Return the URL of the checked article
+                  return articles[index].url;
+                });
+
+                if (checkedArticles.length === 0) {
+                  setShowNoArticlesWarning(true);
+                } else {
+                  setShowNoArticlesWarning(false);
+                  setMetaAnalysisVisible(true);
+                  generateAnalysis(checkedArticles);
+                }
+              }}
+              style={{ fontSize: '1.2rem', padding: '10px 20px', borderRadius: '10px' }}
+            >
+              Generate Meta-Analysis
+            </button>
+            {showNoArticlesWarning && (
+              <p style={{ color: 'red', marginTop: '10px' }}>Please select at least one article before generating a meta-analysis.</p>
+            )}
+          </div>
+        )}
+
         {metaAnalysisVisible && (
           <div style={{ marginTop: '20px', textAlign: 'center' }}>
-            <textarea
-              placeholder="Meta-analysis results will appear here..."
-              rows="10"
-              cols="70"
-              style={{ width: '80%', padding: '10px', fontSize: '1rem', borderRadius: '10px' }}
-            />
+            <div style={{ width: '80%', padding: '10px', fontSize: '1rem', borderRadius: '10px', textAlign: 'left' }}>
+              <p>Generating: {statusMessage}</p>
+            </div>
+          </div>
+        )}
+
+        {metaAnalysisVisible && (
+          <div style={{ marginTop: '20px', textAlign: 'center' }}>
+            <div style={{ width: '80%', padding: '10px', fontSize: '1rem', borderRadius: '10px', textAlign: 'left' }}>
+              <div style={{ width: '100%', backgroundColor: '#f3f3f3', borderRadius: '10px', overflow: 'hidden' }}>
+                
+              </div>
+            </div>
             <div style={{ textAlign: 'center', marginTop: '20px' }}>
               <button
                 onClick={() => setShowConfirmClear(true)}
@@ -170,6 +299,8 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Clear All Confirmation Dialog */}
         {showConfirmClear && (
           <div
             style={{
@@ -177,25 +308,46 @@ function App() {
               top: '50%',
               left: '50%',
               transform: 'translate(-50%, -50%)',
-              backgroundColor: 'white',
+              backgroundColor: '#222',
               padding: '20px',
               boxShadow: '0px 0px 10px rgba(0,0,0,0.5)',
               borderRadius: '10px',
+              border: '1px solid #F9F9F9',
               textAlign: 'center',
             }}
           >
-            <p style={{ color: 'black' }}>
-              Are you sure you want to clear all inputs? This will delete your meta-analysis.
-            </p>
+            <p>Are you sure you want to clear all inputs?</p>
+            <button onClick={handleClearAll} style={{ marginRight: '10px' }}>Yes</button>
+            <button onClick={() => setShowConfirmClear(false)}>No</button>
+          </div>
+        )}
+
+        {/* New Question Confirmation Dialog */}
+        {showConfirmNewQuestion && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              backgroundColor: '#222',
+              padding: '20px',
+              boxShadow: '0px 0px 10px rgba(0,0,0,0.5)',
+              borderRadius: '10px',
+              border: '1px solid #F9F9F9',
+              textAlign: 'center',
+            }}
+          >
+            <p>Submitting a new question will clear all existing inputs and articles. Do you want to continue?</p>
             <div style={{ marginTop: '10px' }}>
               <button
-                onClick={handleClearAll}
+                onClick={confirmNewQuestion}
                 style={{ marginRight: '10px', padding: '10px 20px', fontSize: '1rem', borderRadius: '10px' }}
               >
                 Yes
               </button>
               <button
-                onClick={() => setShowConfirmClear(false)}
+                onClick={() => setShowConfirmNewQuestion(false)}
                 style={{ padding: '10px 20px', fontSize: '1rem', borderRadius: '10px' }}
               >
                 No
@@ -203,44 +355,24 @@ function App() {
             </div>
           </div>
         )}
+
+      
       </div>
 
-      {/* Sidebar for Browser */}
+      {/* Footer */}
       <div
         style={{
-          width: '20%',
-          backgroundColor: '#222', // Light gray background for visibility
+          textAlign: 'center',
+          color: '#fff',
+          backgroundColor: '#333',
+          padding: '10px 0',
           position: 'fixed',
-          top: 0,
           bottom: 0,
-          right: 0,
-          borderLeft: '1px solid #ccc',
-          overflowY: 'auto',
-          padding: '10px',
-          zIndex: 1000, // Ensure it's above other elements
+          left: 0,
+          width: '100%',
         }}
       >
-        <h3>Browser</h3>
-        <div
-          style={{
-            border: '5px solid #ddd',
-            padding: '20px',
-            borderRadius: '10px',
-            marginBottom: '10px',
-          }}
-        >
-          <p>PDF A</p>
-        </div>
-        <div
-          style={{
-            border: '5px solid #ddd',
-            padding: '10px',
-            borderRadius: '10px',
-            marginBottom: '10px',
-          }}
-        >
-          <p>PDF B</p>
-        </div>
+        Developed by Tyler Xiao and Daniel Tritasavit
       </div>
     </div>
   );

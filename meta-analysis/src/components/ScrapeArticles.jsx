@@ -9,14 +9,16 @@ function ScrapeArticles() {
   const handleFetchArticles = async () => {
     try {
       // Make a POST request to the Flask backend
-      const apiUrl = 'http://localhost:8000/scrape-articles'; // API endpoint
+      const apiUrl = 'https://meta-analysis-ca9ad5868390.herokuapp.com/api/scrape-articles'; // FastAPI backend API
       const payload = { prompt };
 
-      // Send POST request with payload
+      // Send POST request to the FastAPI backend
       const response = await axios.post(apiUrl, payload, {
         headers: {
           'Content-Type': 'application/json',
-                },
+          'Access-Control-Allow-Origin':'*'
+
+        },
       });
   
       // Update the articles state with the response data
